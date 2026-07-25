@@ -181,7 +181,12 @@ Deploy in this order — Render needs the Mongo URI, and Vercel needs the Render
 - **Blueprint:** In Render, "New" → "Blueprint" → point at this repo. It reads `render.yaml`
   automatically.
 - **Manual:** "New" → "Web Service" → Root Directory `backend` → Build Command
-  `npm install && npm run build` → Start Command `npm start` → Plan: Free.
+  `npm ci && npm run build` → Start Command `npm start` → Plan: Free.
+
+Use `npm ci`, not `npm install`, for the build command — `npm ci` installs the exact versions
+pinned in `package-lock.json`, while a plain `npm install` can still re-resolve slightly different
+transitive dependency versions on a fresh clone even with a committed lockfile, which previously
+caused `@types/*` packages to resolve inconsistently and broke the TypeScript build on Render.
 
 Either way, set these env vars in the Render dashboard (they're marked `sync: false` in the
 blueprint so they're never committed): `MONGODB_URI`, `CORS_ORIGIN` (the exact Vercel URL you'll
