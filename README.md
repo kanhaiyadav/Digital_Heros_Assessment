@@ -181,12 +181,18 @@ Deploy in this order — Render needs the Mongo URI, and Vercel needs the Render
 - **Blueprint:** In Render, "New" → "Blueprint" → point at this repo. It reads `render.yaml`
   automatically.
 - **Manual:** "New" → "Web Service" → Root Directory `backend` → Build Command
-  `npm ci && npm run build` → Start Command `npm start` → Plan: Free.
+  `npm ci --include=dev && npm run build` → Start Command `npm start` → Plan: Free.
 
-Use `npm ci`, not `npm install`, for the build command — `npm ci` installs the exact versions
-pinned in `package-lock.json`, while a plain `npm install` can still re-resolve slightly different
-transitive dependency versions on a fresh clone even with a committed lockfile, which previously
-caused `@types/*` packages to resolve inconsistently and broke the TypeScript build on Render.
+Two things about that build command matter:
+
+- **`npm ci`, not `npm install`** — installs the exact versions pinned in `package-lock.json`
+  instead of letting npm re-resolve slightly different transitive versions on a fresh clone.
+- **`--include=dev` is required** — this service sets `NODE_ENV=production` (needed at runtime, see
+  `config/env.ts`), but npm also reads `NODE_ENV` during install and, when it's `production`,
+  skips `devDependencies` entirely by default — including `typescript` and every `@types/*`
+  package the build needs. `--include=dev` forces them to install regardless of `NODE_ENV`. Without
+  it, the build fails with a wall of `Could not find a declaration file for module 'express'` /
+  `Cannot find name 'process'` errors that look like a tsconfig problem but aren't.
 
 Either way, set these env vars in the Render dashboard (they're marked `sync: false` in the
 blueprint so they're never committed): `MONGODB_URI`, `CORS_ORIGIN` (the exact Vercel URL you'll
@@ -220,19 +226,26 @@ value in the environment.
 
 Render's free tier sleeps a service after ~15 minutes with no requests, and the next request pays
 a 30–50s cold start — a real problem for the "confirmed working from a fresh browser" requirement.
-Two layers mitigate it, neither requiring a paid tier:
+Three layers mitigate it, none requiring a paid tier:
 
-1. **`.github/workflows/keep-alive.yml`** — a GitHub Actions cron job that pings `/api/health`
-   every 10 minutes, around the clock, independent of whether anyone is actually visiting the
-   site. After deploying the backend, set the target: repo **Settings → Secrets and variables →
-   Actions → Variables → New repository variable** named `RENDER_HEALTH_URL`, value
-   `https://<your-render-service>.onrender.com/api/health`. Without it the workflow just logs a
-   reminder and exits instead of failing.
-2. **`frontend/src/hooks/useKeepAlive.ts`** — while the app is open in a browser tab, it pings the
+1. **A dedicated external cron ping (primary mechanism)** — GitHub Actions' own `schedule` trigger
+   turned out not to be reliable enough for this: it's a documented limitation that GitHub can
+   delay or coalesce sub-hourly cron schedules, and in practice ours was firing roughly once an
+   hour instead of every 10 minutes, observed directly in the Actions run history. A dedicated cron
+   service doesn't share that problem, since keeping to a schedule is its entire job. Set one up
+   free at [cron-job.org](https://cron-job.org) (or UptimeRobot, healthchecks.io — any of them
+   work): create an account, add a new cron job targeting
+   `https://<your-render-service>.onrender.com/api/health`, set the interval to every 10 minutes,
+   save. That's the mechanism actually keeping the service warm.
+2. **`.github/workflows/keep-alive.yml`** — kept as a harmless secondary ping on the same endpoint.
+   Because of the reliability issue above, treat any pings it does deliver as a bonus, not the
+   primary defense. Still configured the same way if you want it: repo **Settings → Secrets and
+   variables → Actions → Variables → New repository variable** named `RENDER_HEALTH_URL`, value
+   `https://<your-render-service>.onrender.com/api/health`.
+3. **`frontend/src/hooks/useKeepAlive.ts`** — while the app is open in a browser tab, it pings the
    same health endpoint every 4 minutes (paused when the tab isn't visible, via the Page
-   Visibility API). This is a supplement for long admin sessions, not a replacement for #1 — a
-   tab has to already be open for it to help, which is exactly the gap the GitHub Actions cron
-   covers instead.
+   Visibility API). Helps long admin sessions specifically; doesn't help a visitor arriving cold,
+   which is what #1 is for.
 
 ---
 

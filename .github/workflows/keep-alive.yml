@@ -2,9 +2,9 @@ name: Keep backend warm
 
 on:
   schedule:
-    # Render's free tier spins down after ~15 min idle. Pinging every 10 min keeps
-    # it warm so nobody hits a 30-50s cold start.
-    - cron: "*/10 * * * *"
+    # Offset off :00/:10/:20... on purpose, since round minutes are peak load and most likely to
+    # get delayed or dropped.
+    - cron: "4,14,24,34,44,54 * * * *"
   workflow_dispatch: {}
 
 jobs:
