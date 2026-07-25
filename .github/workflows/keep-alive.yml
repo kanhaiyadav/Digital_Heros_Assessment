@@ -1,0 +1,24 @@
+name: Keep backend warm
+
+on:
+  schedule:
+    # Render's free tier spins down after ~15 min idle. Pinging every 10 min keeps
+    # it warm so nobody hits a 30-50s cold start.
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        env:
+          HEALTH_URL: ${{ vars.RENDER_HEALTH_URL }}
+        run: |
+          if [ -z "$HEALTH_URL" ]; then
+            echo "RENDER_HEALTH_URL repo variable is not set - skipping ping."
+            echo "Set it at Settings -> Secrets and variables -> Actions -> Variables"
+            echo "to e.g. https://<your-service>.onrender.com/api/health"
+            exit 0
+          fi
+          curl -sf --max-time 60 "$HEALTH_URL" && echo "OK" || echo "Ping failed (service may still be cold-starting)"
